@@ -8,11 +8,11 @@ from datetime import datetime
 
 st.set_page_config(layout="wide")
 
-st.title("📊 EDGE INSTITUCIONAL V6.1")
-st.write("Probabilidade real + robustez de dados + fallback completo")
+st.title("📊 EDGE INSTITUCIONAL V6.2")
+st.write("Correção definitiva de dados + probabilidade real")
 
 # =========================
-# LISTA COMPLETA (SUA)
+# LISTA (SUA)
 # =========================
 ativos = [
 "PETR4.SA","VALE3.SA","BBAS3.SA","ITUB4.SA","BBDC4.SA","WEGE3.SA","PRIO3.SA","RENT3.SA",
@@ -45,87 +45,75 @@ GAIN8 = 0.08
 JANELA = 20
 
 # =========================
-# PREPARAÇÃO
+# NORMALIZAÇÃO (CRÍTICO)
 # =========================
-def preparar(df):
-    df = df.copy()
-
+def normalizar(df):
     if df.empty:
         return df
 
-    try:
-        df.index = df.index.tz_localize(None)
-    except:
-        pass
+    df = df.copy()
 
-    df = df[~df.index.duplicated()]
+    # remove multiindex
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
+
+    # garante colunas padrão
+    df = df.rename(columns={
+        "Adj Close": "Close"
+    })
+
+    colunas = ["Open","High","Low","Close","Volume"]
+
+    for c in colunas:
+        if c not in df.columns:
+            return pd.DataFrame()
+
+    df = df[colunas]
+
+    # força tipo float
+    df = df.astype(float)
+
     df = df.ffill().bfill()
 
     return df
 
 # =========================
-# INDICADORES
+# INDICADORES (AGORA FUNCIONA)
 # =========================
 def indicadores(df):
-    try:
-        df["EMA69"] = EMAIndicator(df["Close"], 69).ema_indicator()
+    df["EMA69"] = EMAIndicator(df["Close"], 69).ema_indicator()
 
-        adx = ADXIndicator(df["High"], df["Low"], df["Close"], 14)
-        df["DI+"] = adx.adx_pos()
-        df["DI-"] = adx.adx_neg()
-        df["ADX"] = adx.adx()
+    adx = ADXIndicator(df["High"], df["Low"], df["Close"], 14)
+    df["DI+"] = adx.adx_pos()
+    df["DI-"] = adx.adx_neg()
+    df["ADX"] = adx.adx()
 
-        stoch = StochasticOscillator(df["High"], df["Low"], df["Close"], 14, 3)
-        df["%K"] = stoch.stoch()
-        df["%D"] = stoch.stoch_signal()
+    stoch = StochasticOscillator(df["High"], df["Low"], df["Close"], 14, 3)
+    df["%K"] = stoch.stoch()
+    df["%D"] = stoch.stoch_signal()
 
-        return df.ffill().bfill()
-
-    except Exception as e:
-        return pd.DataFrame()
+    return df.dropna()
 
 # =========================
 # PROBABILIDADE
 # =========================
 def probabilidade(df, gain):
-    ganhos = 0
-    perdas = 0
+    g, l = 0, 0
 
     for i in range(70, len(df) - JANELA):
         entry = df.iloc[i]["Close"]
-        future = df.iloc[i+1:i+1+JANELA]
+        fut = df.iloc[i+1:i+1+JANELA]
 
-        for _, row in future.iterrows():
+        for _, row in fut.iterrows():
             if row["High"] >= entry * (1 + gain):
-                ganhos += 1
+                g += 1
                 break
-
             if row["Low"] <= entry * (1 - STOP):
-                perdas += 1
+                l += 1
                 break
 
-    total = ganhos + perdas
-
-    if total == 0:
-        return 0
-
-    return ganhos / total
-
-# =========================
-# SCORE
-# =========================
-def score(df):
-    try:
-        u = df.iloc[-1]
-        s = 0
-
-        if u["Close"] > u["EMA69"]: s += 2
-        if u["DI+"] > u["DI-"]: s += 2
-        if u["%K"] > u["%D"]: s += 1
-
-        return s
-    except:
-        return 0
+    total = g + l
+    return g / total if total > 0 else 0
 
 # =========================
 # EXECUÇÃO
@@ -140,63 +128,44 @@ for i, ativo in enumerate(ativos):
         df = yf.download(ativo, period="2y", interval="1d", progress=False)
 
         if df.empty:
-            erros.append(f"{ativo} - vazio")
+            erros.append(f"{ativo} vazio")
             continue
 
-        df = preparar(df)
+        df = normalizar(df)
 
-        if len(df) < 100:
-            erros.append(f"{ativo} - poucos dados")
+        if df.empty or len(df) < 100:
+            erros.append(f"{ativo} dados inválidos")
             continue
 
         df = indicadores(df)
 
         if df.empty:
-            erros.append(f"{ativo} - erro indicadores")
+            erros.append(f"{ativo} indicadores falharam")
             continue
 
-        prob6 = probabilidade(df, GAIN6)
-        prob8 = probabilidade(df, GAIN8)
-
-        melhor = max(prob6, prob8)
-
-        sc = score(df)
-        adx = df.iloc[-1]["ADX"] if "ADX" in df.columns else 0
-
-        score_final = (
-            (melhor * 0.5) +
-            ((sc / 5) * 0.3) +
-            ((adx / 50) * 0.2)
-        )
+        p6 = probabilidade(df, GAIN6)
+        p8 = probabilidade(df, GAIN8)
 
         res.append({
             "Ativo": ativo.replace(".SA",""),
-            "Prob 6%": round(prob6*100,2),
-            "Prob 8%": round(prob8*100,2),
-            "Melhor (%)": round(melhor*100,2),
-            "Score Tec": sc,
-            "ADX": round(adx,2),
-            "Score Final": round(score_final,4)
+            "Prob 6%": round(p6*100,2),
+            "Prob 8%": round(p8*100,2),
+            "Melhor": round(max(p6,p8)*100,2)
         })
 
     except Exception as e:
-        erros.append(f"{ativo} - erro geral")
+        erros.append(f"{ativo} erro geral")
 
     progress.progress((i+1)/len(ativos))
 
 df_res = pd.DataFrame(res)
 
-# =========================
-# OUTPUT
-# =========================
 if not df_res.empty:
-    df_res = df_res.sort_values(by="Score Final", ascending=False)
-    st.dataframe(df_res, use_container_width=True)
+    st.dataframe(df_res.sort_values(by="Melhor", ascending=False), use_container_width=True)
 else:
-    st.error("Nenhum ativo processado com sucesso.")
+    st.error("Nenhum ativo processado — verificar logs")
 
-# LOG DE ERROS (IMPORTANTE)
-with st.expander("🔍 Ver erros de dados"):
+with st.expander("Logs"):
     for e in erros[:50]:
         st.write(e)
 
