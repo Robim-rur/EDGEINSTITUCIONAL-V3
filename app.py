@@ -8,174 +8,118 @@ from datetime import datetime
 
 st.set_page_config(layout="wide")
 
-st.title("📊 EDGE INSTITUCIONAL V5.6")
-st.write("Sistema completo: setup + expectativa real + confirmação semanal + ranking")
+st.title("📊 EDGE INSTITUCIONAL V6")
+st.write("Probabilidade REAL: Gain antes do Loss")
 
 # =========================
-# CONFIG
+# LISTA FIXA (SUA)
 # =========================
 ativos = [
-    "PETR4","VALE3","BBAS3","ITUB4","BBDC4","WEGE3","PRIO3","RENT3",
-"ELET3","ELET6","CPLE6","CMIG4","TAEE11","EGIE3","VIVT3","TIMS3",
-"ABEV3","RADL3","SUZB3","GGBR4","GOAU4","USIM5","CSNA3","RAIL3",
-"SBSP3","EQTL3","HYPE3","MULT3","LREN3","ARZZ3","TOTS3","EMBR3",
-"JBSS3","BEEF3","MRFG3","BRFS3","SLCE3","SMTO3","B3SA3","BBSE3",
-"BPAC11","SANB11","ITSA4","BRSR6","CXSE3","POMO4","STBP3","TUPY3",
-"DIRR3","CYRE3","EZTC3","JHSF3","KEPL3","POSI3","MOVI3","PETZ3",
-"COGN3","YDUQ3","MGLU3","NTCO3","AZUL4","GOLL4","CVCB3","RRRP3",
-"RECV3","ENAT3","ORVR3","AURE3","ENEV3","UGPA3",
+    "PETR4.SA","VALE3.SA","BBAS3.SA","ITUB4.SA","BBDC4.SA","WEGE3.SA","PRIO3.SA","RENT3.SA",
+    "ELET3.SA","ELET6.SA","CPLE6.SA","CMIG4.SA","TAEE11.SA","EGIE3.SA","VIVT3.SA","TIMS3.SA",
+    "ABEV3.SA","RADL3.SA","SUZB3.SA","GGBR4.SA","GOAU4.SA","USIM5.SA","CSNA3.SA","RAIL3.SA",
+    "SBSP3.SA","EQTL3.SA","HYPE3.SA","MULT3.SA","LREN3.SA","ARZZ3.SA","TOTS3.SA","EMBR3.SA",
+    "JBSS3.SA","BEEF3.SA","MRFG3.SA","BRFS3.SA","SLCE3.SA","SMTO3.SA","B3SA3.SA","BBSE3.SA",
+    "BPAC11.SA","SANB11.SA","ITSA4.SA","BRSR6.SA","CXSE3.SA","POMO4.SA","STBP3.SA","TUPY3.SA",
+    "DIRR3.SA","CYRE3.SA","EZTC3.SA","JHSF3.SA","KEPL3.SA","POSI3.SA","MOVI3.SA","PETZ3.SA",
+    "COGN3.SA","YDUQ3.SA","MGLU3.SA","NTCO3.SA","AZUL4.SA","GOLL4.SA","CVCB3.SA","RRRP3.SA",
+    "RECV3.SA","ENAT3.SA","ORVR3.SA","AURE3.SA","ENEV3.SA","UGPA3.SA",
 
-"BOVA11","IVVB11","SMAL11","HASH11","GOLD11","DIVO11","NDIV11",
+    "BOVA11.SA","IVVB11.SA","SMAL11.SA","HASH11.SA","GOLD11.SA","DIVO11.SA","NDIV11.SA",
 
-"HGLG11","XPLG11","VISC11","MXRF11","KNRI11","KNCR11","KNIP11",
-"CPTS11","IRDM11","TRXF11","TGAR11","HGRU11","ALZR11","AUVP11",
-"IEEX11","UTLL11", 
+    "HGLG11.SA","XPLG11.SA","VISC11.SA","MXRF11.SA","KNRI11.SA","KNCR11.SA","KNIP11.SA",
+    "CPTS11.SA","IRDM11.SA","TRXF11.SA","TGAR11.SA","HGRU11.SA","ALZR11.SA","AUVP11.SA",
+    "IEEX11.SA","UTLL11.SA",
 
-"AAPL34","AMZO34","GOGL34","MSFT34","TSLA34","META34","NFLX34",
-"NVDC34","MELI34","BABA34","DISB34","PYPL34","JNJB34","VISA34",
-"WMTB34","NIKE34","ADBE34","CSCO34","INTC34","JPMC34","ORCL34",
-"QCOM34","SBUX34","TXN34","ABTT34","AMGN34","AXPB34","BERK34",
+    "AAPL34.SA","AMZO34.SA","GOGL34.SA","MSFT34.SA","TSLA34.SA","META34.SA","NFLX34.SA",
+    "NVDC34.SA","MELI34.SA","BABA34.SA","DISB34.SA","PYPL34.SA","JNJB34.SA","VISA34.SA",
+    "WMTB34.SA","NIKE34.SA","ADBE34.SA","CSCO34.SA","INTC34.SA","JPMC34.SA","ORCL34.SA",
+    "QCOM34.SA","SBUX34.SA","TXN34.SA","ABTT34.SA","AMGN34.SA","AXPB34.SA","BERK34.SA",
 
-"C2OL34"
+    "C2OL34.SA"
 ]
 
 STOP = 0.05
+GAIN6 = 0.06
+GAIN8 = 0.08
 JANELA = 20
 
 # =========================
-# TRATAMENTO DE DADOS
+# PREPARAÇÃO
 # =========================
-def preparar_dados(df):
+def preparar(df):
     df = df.copy()
-
-    if df.empty:
-        return df
-
     try:
         df.index = df.index.tz_localize(None)
     except:
         pass
 
     df = df[~df.index.duplicated()]
-    df = df.dropna()
+    df = df.ffill().bfill()
 
     return df
 
 # =========================
 # INDICADORES
 # =========================
-def calcular_indicadores(df):
-    df["EMA69"] = EMAIndicator(close=df["Close"], window=69).ema_indicator()
+def indicadores(df):
+    df["EMA69"] = EMAIndicator(df["Close"], 69).ema_indicator()
 
-    adx = ADXIndicator(high=df["High"], low=df["Low"], close=df["Close"], window=14)
+    adx = ADXIndicator(df["High"], df["Low"], df["Close"], 14)
     df["DI+"] = adx.adx_pos()
     df["DI-"] = adx.adx_neg()
     df["ADX"] = adx.adx()
 
-    stoch = StochasticOscillator(
-        high=df["High"],
-        low=df["Low"],
-        close=df["Close"],
-        window=14,
-        smooth_window=3
-    )
-
+    stoch = StochasticOscillator(df["High"], df["Low"], df["Close"], 14, 3)
     df["%K"] = stoch.stoch()
     df["%D"] = stoch.stoch_signal()
 
-    return df.dropna()
+    return df.ffill().bfill()
 
 # =========================
-# SEMANAL
+# PROBABILIDADE REAL
 # =========================
-def gerar_semanal(df):
-    semanal = df.resample("W").agg({
-        "Open": "first",
-        "High": "max",
-        "Low": "min",
-        "Close": "last",
-        "Volume": "sum"
-    }).dropna()
-
-    return calcular_indicadores(semanal)
-
-# =========================
-# SCORE TÉCNICO
-# =========================
-def score_setup(df_d, df_w):
-    d = df_d.iloc[-1]
-    w = df_w.iloc[-1]
-
-    score = 0
-
-    # Diário
-    if d["Close"] > d["EMA69"]: score += 2
-    if d["DI+"] > d["DI-"]: score += 2
-    if d["%K"] > d["%D"]: score += 1
-
-    # Semanal
-    if w["Close"] > w["EMA69"]: score += 2
-    if w["DI+"] > w["DI-"]: score += 2
-    if w["%K"] > w["%D"]: score += 1
-
-    return score
-
-# =========================
-# BACKTEST REALISTA
-# =========================
-def backtest_realista(df):
-    retornos = []
-    tempos = []
-    wins = 0
-
-    if len(df) < 100:
-        return 0, 0, 0
+def probabilidade(df, gain):
+    ganhos = 0
+    perdas = 0
 
     for i in range(70, len(df) - JANELA):
-        linha = df.iloc[i]
+        entry = df.iloc[i]["Close"]
+        future = df.iloc[i+1:i+1+JANELA]
 
-        # leve filtro de tendência
-        if linha["Close"] > linha["EMA69"]:
+        for _, row in future.iterrows():
+            if row["High"] >= entry * (1 + gain):
+                ganhos += 1
+                break
 
-            entrada = linha["Close"]
-            futuro = df.iloc[i+1:i+1+JANELA]
+            if row["Low"] <= entry * (1 - STOP):
+                perdas += 1
+                break
 
-            if futuro.empty:
-                continue
+    total = ganhos + perdas
 
-            max_price = futuro["High"].max()
-            min_price = futuro["Low"].min()
+    if total == 0:
+        return 0
 
-            retorno = (max_price - entrada) / entrada
-            drawdown = (min_price - entrada) / entrada
+    return ganhos / total
 
-            # aplica stop
-            if drawdown <= -STOP:
-                retorno = -STOP
+# =========================
+# SCORE
+# =========================
+def score(df):
+    u = df.iloc[-1]
+    s = 0
 
-            if retorno > 0:
-                wins += 1
+    if u["Close"] > u["EMA69"]: s += 2
+    if u["DI+"] > u["DI-"]: s += 2
+    if u["%K"] > u["%D"]: s += 1
 
-            retornos.append(retorno)
-
-            # tempo até topo
-            idx = futuro["High"].idxmax()
-            tempo = futuro.index.get_loc(idx) + 1
-            tempos.append(tempo)
-
-    if len(retornos) == 0:
-        return 0, 0, 0
-
-    expectativa = np.mean(retornos)
-    win_rate = wins / len(retornos)
-    tempo_medio = np.mean(tempos)
-
-    return expectativa, win_rate, tempo_medio
+    return s
 
 # =========================
 # EXECUÇÃO
 # =========================
-resultados = []
+res = []
 progress = st.progress(0)
 
 for i, ativo in enumerate(ativos):
@@ -185,53 +129,48 @@ for i, ativo in enumerate(ativos):
         if df.empty:
             continue
 
-        df = preparar_dados(df)
+        df = preparar(df)
+        df = indicadores(df)
 
         if len(df) < 100:
             continue
 
-        df = calcular_indicadores(df)
-        df_w = gerar_semanal(df)
+        prob6 = probabilidade(df, GAIN6)
+        prob8 = probabilidade(df, GAIN8)
 
-        if df_w.empty or len(df_w) < 20:
-            continue
+        melhor_prob = max(prob6, prob8)
 
-        expectativa, win_rate, tempo = backtest_realista(df)
-        score_tec = score_setup(df, df_w)
-
+        score_tec = score(df)
         adx = df.iloc[-1]["ADX"]
 
-        # SCORE FINAL (NÃO BLOQUEIA)
+        # SCORE FINAL
         score_final = (
-            (expectativa * 0.4) +
-            (win_rate * 0.2) +
-            ((score_tec / 10) * 0.2) +
-            ((1 / (tempo + 1)) * 0.1) +
-            ((adx / 50) * 0.1)
+            (melhor_prob * 0.5) +
+            ((score_tec / 5) * 0.3) +
+            ((adx / 50) * 0.2)
         )
 
-        resultados.append({
+        res.append({
             "Ativo": ativo.replace(".SA",""),
-            "Score Setup": score_tec,
-            "Expectativa": round(expectativa, 4),
-            "Win Rate (%)": round(win_rate * 100, 2),
-            "Tempo Médio": round(tempo, 1),
-            "ADX": round(adx, 2),
-            "Score Final": round(score_final, 4)
+            "Prob Gain 6%": round(prob6*100,2),
+            "Prob Gain 8%": round(prob8*100,2),
+            "Melhor Prob (%)": round(melhor_prob*100,2),
+            "Score Técnico": score_tec,
+            "ADX": round(adx,2),
+            "Score Final": round(score_final,4)
         })
 
     except:
         continue
 
-    progress.progress((i + 1) / len(ativos))
+    progress.progress((i+1)/len(ativos))
 
-df_res = pd.DataFrame(resultados)
+df_res = pd.DataFrame(res)
 
 if not df_res.empty:
     df_res = df_res.sort_values(by="Score Final", ascending=False)
     st.dataframe(df_res, use_container_width=True)
 else:
-    st.warning("⚠️ Nenhum ativo com dados suficientes ou consistentes.")
+    st.error("Erro nos dados — tente novamente.")
 
 st.write("⏱ Atualizado em:", datetime.now().strftime("%d/%m/%Y %H:%M:%S"))
-
