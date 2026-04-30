@@ -8,12 +8,9 @@ from datetime import datetime
 
 st.set_page_config(layout="wide")
 
-st.title("📊 EDGE INSTITUCIONAL V5.4")
-st.write("Modelo completo: retorno real + setup técnico + confirmação semanal")
+st.title("📊 EDGE INSTITUCIONAL V5.4.1")
+st.write("Versão corrigida (dados + indicadores + backtest confiável)")
 
-# =========================
-# CONFIG
-# =========================
 ativos = [
    "PETR4","VALE3","BBAS3","ITUB4","BBDC4","WEGE3","PRIO3","RENT3",
 "ELET3","ELET6","CPLE6","CMIG4","TAEE11","EGIE3","VIVT3","TIMS3",
@@ -43,6 +40,23 @@ STOP = 0.05
 JANELA = 20
 
 # =========================
+# LIMPEZA DE DADOS
+# =========================
+def limpar_dados(df):
+    df = df.copy()
+
+    # remove timezone
+    df.index = df.index.tz_localize(None)
+
+    # remove duplicados
+    df = df[~df.index.duplicated()]
+
+    # remove NaN
+    df = df.dropna()
+
+    return df
+
+# =========================
 # INDICADORES
 # =========================
 def calc(df):
@@ -57,16 +71,21 @@ def calc(df):
     df["%K"] = stoch.stoch()
     df["%D"] = stoch.stoch_signal()
 
-    return df
+    return df.dropna()
 
 def semanal(df):
     w = df.resample("W").agg({
-        "Open":"first","High":"max","Low":"min","Close":"last","Volume":"sum"
+        "Open":"first",
+        "High":"max",
+        "Low":"min",
+        "Close":"last",
+        "Volume":"sum"
     }).dropna()
+
     return calc(w)
 
 # =========================
-# SCORE TÉCNICO COMPLETO
+# SCORE
 # =========================
 def score_setup(df_d, df_w):
     d = df_d.iloc[-1]
@@ -74,34 +93,37 @@ def score_setup(df_d, df_w):
 
     score = 0
 
-    # Diário
     if d["Close"] > d["EMA69"]: score += 2
     if d["DI+"] > d["DI-"]: score += 2
     if d["%K"] > d["%D"]: score += 1
 
-    # Semanal
     if w["Close"] > w["EMA69"]: score += 2
     if w["DI+"] > w["DI-"]: score += 2
     if w["%K"] > w["%D"]: score += 1
 
-    return score  # máx 10
+    return score
 
 # =========================
-# BACKTEST REALISTA
+# BACKTEST
 # =========================
 def backtest(df):
     retornos = []
     tempos = []
     ganhos = 0
 
+    if len(df) < 100:
+        return 0, 0, 0
+
     for i in range(70, len(df) - JANELA):
         r = df.iloc[i]
 
-        # filtro leve (tendência mínima)
         if r["Close"] > r["EMA69"]:
 
             entry = r["Close"]
             future = df.iloc[i+1:i+1+JANELA]
+
+            if future.empty:
+                continue
 
             max_price = future["High"].max()
             min_price = future["Low"].min()
@@ -117,12 +139,11 @@ def backtest(df):
 
             retornos.append(retorno)
 
-            # tempo até topo
             idx_max = future["High"].idxmax()
             tempo = future.index.get_loc(idx_max) + 1
             tempos.append(tempo)
 
-    if not retornos:
+    if len(retornos) == 0:
         return 0, 0, 0
 
     expectativa = np.mean(retornos)
@@ -139,19 +160,26 @@ prog = st.progress(0)
 
 for i, ativo in enumerate(ativos):
     try:
-        df = yf.download(ativo, period="2y", interval="1d")
+        df = yf.download(ativo, period="2y", interval="1d", progress=False)
 
         if df.empty:
+            continue
+
+        df = limpar_dados(df)
+
+        if len(df) < 100:
             continue
 
         df = calc(df)
         w = semanal(df)
 
+        if len(w) < 20:
+            continue
+
         expectativa, win_rate, tempo = backtest(df)
         sc_setup = score_setup(df, w)
         adx = df.iloc[-1]["ADX"]
 
-        # NÃO trava — apenas penaliza se setup ruim
         score_final = (
             (expectativa * 0.5) +
             (win_rate * 0.2) +
@@ -169,7 +197,7 @@ for i, ativo in enumerate(ativos):
             "Score Final": round(score_final,4)
         })
 
-    except:
+    except Exception as e:
         continue
 
     prog.progress((i+1)/len(ativos))
@@ -180,6 +208,6 @@ if not df_res.empty:
     df_res = df_res.sort_values(by="Score Final", ascending=False)
     st.dataframe(df_res, use_container_width=True)
 else:
-    st.warning("Sem dados suficientes no momento.")
+    st.warning("⚠️ Nenhum ativo gerou dados válidos — tente ampliar a lista de ativos.")
 
 st.write("⏱ Atualizado em:", datetime.now().strftime("%d/%m/%Y %H:%M:%S"))
