@@ -8,8 +8,8 @@ from datetime import datetime
 
 st.set_page_config(layout="wide")
 
-st.title("📊 EDGE INSTITUCIONAL V5.1")
-st.write("Expectativa matemática como filtro + score adaptativo + comparador 6% vs 8%")
+st.title("📊 EDGE INSTITUCIONAL V5.2")
+st.write("Expectativa + velocidade + janela realista (20 candles)")
 
 # =========================
 # CONFIG
@@ -41,6 +41,7 @@ ativos = [
 
 STOP = 0.05
 GAINS = [0.06, 0.08]
+JANELA = 20
 
 # =========================
 # INDICADORES
@@ -61,17 +62,13 @@ def calc(df):
 
 def semanal(df):
     w = df.resample("W").agg({
-        "Open":"first",
-        "High":"max",
-        "Low":"min",
-        "Close":"last",
-        "Volume":"sum"
+        "Open":"first","High":"max","Low":"min","Close":"last","Volume":"sum"
     }).dropna()
 
     return calc(w)
 
 # =========================
-# SCORE (NÃO BLOQUEIA)
+# SCORE TÉCNICO
 # =========================
 def score_setup(df_d, df_w):
     d = df_d.iloc[-1]
@@ -87,45 +84,51 @@ def score_setup(df_d, df_w):
     if w["DI+"] > w["DI-"]: score += 2
     if w["%K"] > w["%D"]: score += 1
 
-    return score  # máximo 10
+    return score
 
 # =========================
-# BACKTEST
+# BACKTEST COM TEMPO
 # =========================
 def backtest(df, gain):
-    g, l, t = 0, 0, 0
+    ganhos, perdas, total = 0, 0, 0
+    dias_gain = []
+    dias_loss = []
 
-    for i in range(70, len(df) - 10):
+    for i in range(70, len(df) - JANELA):
         r = df.iloc[i]
 
-        # leve filtro (não rígido)
+        # filtro leve
         if r["Close"] > r["EMA69"]:
 
             entry = r["Close"]
-            fut = df.iloc[i+1:i+10]
+            future = df.iloc[i+1:i+1+JANELA]
 
-            for _, row in fut.iterrows():
+            for j, (_, row) in enumerate(future.iterrows()):
                 if row["High"] >= entry * (1 + gain):
-                    g += 1
+                    ganhos += 1
+                    dias_gain.append(j + 1)
                     break
+
                 if row["Low"] <= entry * (1 - STOP):
-                    l += 1
+                    perdas += 1
+                    dias_loss.append(j + 1)
                     break
             else:
-                l += 1
+                perdas += 1
 
-            t += 1
+            total += 1
 
-    if t == 0:
-        return 0, 0, 0, 0
+    if total == 0:
+        return 0, 0, 0, 0, 0
 
-    pg = g / t
-    pl = l / t
+    pg = ganhos / total
+    pl = perdas / total
     edge = pg - pl
-
     expectativa = (pg * gain) - (pl * STOP)
 
-    return pg, pl, edge, expectativa
+    tempo_gain = np.mean(dias_gain) if dias_gain else 0
+
+    return pg, pl, edge, expectativa, tempo_gain
 
 # =========================
 # EXECUÇÃO
@@ -149,28 +152,29 @@ for i, ativo in enumerate(ativos):
         cenarios = []
 
         for g in GAINS:
-            pg, pl, edge, exp = backtest(df, g)
+            pg, pl, edge, exp, tempo = backtest(df, g)
 
             cenarios.append({
                 "gain": int(g * 100),
                 "pg": pg,
                 "pl": pl,
                 "edge": edge,
-                "exp": exp
+                "exp": exp,
+                "tempo": tempo
             })
 
-        # melhor cenário por expectativa
-        best = max(cenarios, key=lambda x: x["exp"])
+        # melhor cenário (expectativa primeiro, depois velocidade)
+        best = sorted(cenarios, key=lambda x: (x["exp"], -x["tempo"]), reverse=True)[0]
 
-        # 🔥 FILTRO REAL
         if best["exp"] <= 0:
             continue
 
-        # SCORE FINAL (institucional)
+        # SCORE FINAL
         score_final = (
             (best["exp"] * 0.5) +
             (best["edge"] * 0.3) +
-            ((sc_setup / 10) * 0.2)
+            ((sc_setup / 10) * 0.1) +
+            ((1 / (best["tempo"] + 1)) * 0.1)
         )
 
         res.append({
@@ -181,10 +185,9 @@ for i, ativo in enumerate(ativos):
             "Prob Loss (%)": round(best["pl"] * 100, 2),
             "Edge": round(best["edge"], 4),
             "Expectativa": round(best["exp"], 4),
+            "Tempo Médio (dias)": round(best["tempo"], 1),
             "Score Final": round(score_final, 4),
-            "ADX": round(adx, 2),
-            "Score Gain 6": round(cenarios[0]["exp"], 4),
-            "Score Gain 8": round(cenarios[1]["exp"], 4)
+            "ADX": round(adx, 2)
         })
 
     except:
