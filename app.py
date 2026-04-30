@@ -8,8 +8,8 @@ from datetime import datetime
 
 st.set_page_config(layout="wide")
 
-st.title("📊 EDGE INSTITUCIONAL V5.2")
-st.write("Expectativa + velocidade + janela realista (20 candles)")
+st.title("📊 EDGE INSTITUCIONAL V5.4")
+st.write("Modelo completo: retorno real + setup técnico + confirmação semanal")
 
 # =========================
 # CONFIG
@@ -40,7 +40,6 @@ ativos = [
 ]
 
 STOP = 0.05
-GAINS = [0.06, 0.08]
 JANELA = 20
 
 # =========================
@@ -64,11 +63,10 @@ def semanal(df):
     w = df.resample("W").agg({
         "Open":"first","High":"max","Low":"min","Close":"last","Volume":"sum"
     }).dropna()
-
     return calc(w)
 
 # =========================
-# SCORE TÉCNICO
+# SCORE TÉCNICO COMPLETO
 # =========================
 def score_setup(df_d, df_w):
     d = df_d.iloc[-1]
@@ -76,59 +74,62 @@ def score_setup(df_d, df_w):
 
     score = 0
 
+    # Diário
     if d["Close"] > d["EMA69"]: score += 2
     if d["DI+"] > d["DI-"]: score += 2
     if d["%K"] > d["%D"]: score += 1
 
+    # Semanal
     if w["Close"] > w["EMA69"]: score += 2
     if w["DI+"] > w["DI-"]: score += 2
     if w["%K"] > w["%D"]: score += 1
 
-    return score
+    return score  # máx 10
 
 # =========================
-# BACKTEST COM TEMPO
+# BACKTEST REALISTA
 # =========================
-def backtest(df, gain):
-    ganhos, perdas, total = 0, 0, 0
-    dias_gain = []
-    dias_loss = []
+def backtest(df):
+    retornos = []
+    tempos = []
+    ganhos = 0
 
     for i in range(70, len(df) - JANELA):
         r = df.iloc[i]
 
-        # filtro leve
+        # filtro leve (tendência mínima)
         if r["Close"] > r["EMA69"]:
 
             entry = r["Close"]
             future = df.iloc[i+1:i+1+JANELA]
 
-            for j, (_, row) in enumerate(future.iterrows()):
-                if row["High"] >= entry * (1 + gain):
-                    ganhos += 1
-                    dias_gain.append(j + 1)
-                    break
+            max_price = future["High"].max()
+            min_price = future["Low"].min()
 
-                if row["Low"] <= entry * (1 - STOP):
-                    perdas += 1
-                    dias_loss.append(j + 1)
-                    break
-            else:
-                perdas += 1
+            retorno = (max_price - entry) / entry
+            drawdown = (min_price - entry) / entry
 
-            total += 1
+            if drawdown <= -STOP:
+                retorno = -STOP
 
-    if total == 0:
-        return 0, 0, 0, 0, 0
+            if retorno > 0:
+                ganhos += 1
 
-    pg = ganhos / total
-    pl = perdas / total
-    edge = pg - pl
-    expectativa = (pg * gain) - (pl * STOP)
+            retornos.append(retorno)
 
-    tempo_gain = np.mean(dias_gain) if dias_gain else 0
+            # tempo até topo
+            idx_max = future["High"].idxmax()
+            tempo = future.index.get_loc(idx_max) + 1
+            tempos.append(tempo)
 
-    return pg, pl, edge, expectativa, tempo_gain
+    if not retornos:
+        return 0, 0, 0
+
+    expectativa = np.mean(retornos)
+    win_rate = ganhos / len(retornos)
+    tempo_medio = np.mean(tempos)
+
+    return expectativa, win_rate, tempo_medio
 
 # =========================
 # EXECUÇÃO
@@ -146,54 +147,32 @@ for i, ativo in enumerate(ativos):
         df = calc(df)
         w = semanal(df)
 
+        expectativa, win_rate, tempo = backtest(df)
         sc_setup = score_setup(df, w)
         adx = df.iloc[-1]["ADX"]
 
-        cenarios = []
-
-        for g in GAINS:
-            pg, pl, edge, exp, tempo = backtest(df, g)
-
-            cenarios.append({
-                "gain": int(g * 100),
-                "pg": pg,
-                "pl": pl,
-                "edge": edge,
-                "exp": exp,
-                "tempo": tempo
-            })
-
-        # melhor cenário (expectativa primeiro, depois velocidade)
-        best = sorted(cenarios, key=lambda x: (x["exp"], -x["tempo"]), reverse=True)[0]
-
-        if best["exp"] <= 0:
-            continue
-
-        # SCORE FINAL
+        # NÃO trava — apenas penaliza se setup ruim
         score_final = (
-            (best["exp"] * 0.5) +
-            (best["edge"] * 0.3) +
-            ((sc_setup / 10) * 0.1) +
-            ((1 / (best["tempo"] + 1)) * 0.1)
+            (expectativa * 0.5) +
+            (win_rate * 0.2) +
+            ((sc_setup / 10) * 0.2) +
+            ((1 / (tempo + 1)) * 0.1)
         )
 
         res.append({
             "Ativo": ativo.replace(".SA",""),
             "Score Setup": sc_setup,
-            "Melhor Gain (%)": best["gain"],
-            "Prob Gain (%)": round(best["pg"] * 100, 2),
-            "Prob Loss (%)": round(best["pl"] * 100, 2),
-            "Edge": round(best["edge"], 4),
-            "Expectativa": round(best["exp"], 4),
-            "Tempo Médio (dias)": round(best["tempo"], 1),
-            "Score Final": round(score_final, 4),
-            "ADX": round(adx, 2)
+            "Expectativa": round(expectativa,4),
+            "Win Rate (%)": round(win_rate*100,2),
+            "Tempo Médio": round(tempo,1),
+            "ADX": round(adx,2),
+            "Score Final": round(score_final,4)
         })
 
     except:
         continue
 
-    prog.progress((i + 1) / len(ativos))
+    prog.progress((i+1)/len(ativos))
 
 df_res = pd.DataFrame(res)
 
@@ -201,6 +180,6 @@ if not df_res.empty:
     df_res = df_res.sort_values(by="Score Final", ascending=False)
     st.dataframe(df_res, use_container_width=True)
 else:
-    st.warning("Nenhum ativo com expectativa positiva no momento.")
+    st.warning("Sem dados suficientes no momento.")
 
 st.write("⏱ Atualizado em:", datetime.now().strftime("%d/%m/%Y %H:%M:%S"))
