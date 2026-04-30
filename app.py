@@ -8,11 +8,14 @@ from datetime import datetime
 
 st.set_page_config(layout="wide")
 
-st.title("📊 EDGE INSTITUCIONAL V5")
-st.write("Score adaptativo + expectativa matemática + comparador 6% vs 8%")
+st.title("📊 EDGE INSTITUCIONAL V5.1")
+st.write("Expectativa matemática como filtro + score adaptativo + comparador 6% vs 8%")
 
+# =========================
+# CONFIG
+# =========================
 ativos = [
-    "PETR4","VALE3","BBAS3","ITUB4","BBDC4","WEGE3","PRIO3","RENT3",
+   "PETR4","VALE3","BBAS3","ITUB4","BBDC4","WEGE3","PRIO3","RENT3",
 "ELET3","ELET6","CPLE6","CMIG4","TAEE11","EGIE3","VIVT3","TIMS3",
 "ABEV3","RADL3","SUZB3","GGBR4","GOAU4","USIM5","CSNA3","RAIL3",
 "SBSP3","EQTL3","HYPE3","MULT3","LREN3","ARZZ3","TOTS3","EMBR3",
@@ -25,7 +28,8 @@ ativos = [
 "BOVA11","IVVB11","SMAL11","HASH11","GOLD11","DIVO11","NDIV11",
 
 "HGLG11","XPLG11","VISC11","MXRF11","KNRI11","KNCR11","KNIP11",
-"CPTS11","IRDM11","TRXF11","TGAR11","HGRU11","ALZR11",
+"CPTS11","IRDM11","TRXF11","TGAR11","HGRU11","ALZR11","AUVP11",
+"IEEX11","UTLL11", 
 
 "AAPL34","AMZO34","GOGL34","MSFT34","TSLA34","META34","NFLX34",
 "NVDC34","MELI34","BABA34","DISB34","PYPL34","JNJB34","VISA34",
@@ -43,6 +47,7 @@ GAINS = [0.06, 0.08]
 # =========================
 def calc(df):
     df["EMA69"] = EMAIndicator(df["Close"], 69).ema_indicator()
+
     adx = ADXIndicator(df["High"], df["Low"], df["Close"], 14)
     df["DI+"] = adx.adx_pos()
     df["DI-"] = adx.adx_neg()
@@ -51,16 +56,22 @@ def calc(df):
     stoch = StochasticOscillator(df["High"], df["Low"], df["Close"], 14, 3)
     df["%K"] = stoch.stoch()
     df["%D"] = stoch.stoch_signal()
+
     return df
 
 def semanal(df):
     w = df.resample("W").agg({
-        "Open":"first","High":"max","Low":"min","Close":"last","Volume":"sum"
+        "Open":"first",
+        "High":"max",
+        "Low":"min",
+        "Close":"last",
+        "Volume":"sum"
     }).dropna()
+
     return calc(w)
 
 # =========================
-# SCORE FLEXÍVEL
+# SCORE (NÃO BLOQUEIA)
 # =========================
 def score_setup(df_d, df_w):
     d = df_d.iloc[-1]
@@ -76,7 +87,7 @@ def score_setup(df_d, df_w):
     if w["DI+"] > w["DI-"]: score += 2
     if w["%K"] > w["%D"]: score += 1
 
-    return score
+    return score  # máximo 10
 
 # =========================
 # BACKTEST
@@ -84,18 +95,20 @@ def score_setup(df_d, df_w):
 def backtest(df, gain):
     g, l, t = 0, 0, 0
 
-    for i in range(70, len(df)-10):
+    for i in range(70, len(df) - 10):
         r = df.iloc[i]
 
-        if r["Close"] > r["EMA69"] and r["DI+"] > r["DI-"]:
+        # leve filtro (não rígido)
+        if r["Close"] > r["EMA69"]:
+
             entry = r["Close"]
             fut = df.iloc[i+1:i+10]
 
             for _, row in fut.iterrows():
-                if row["High"] >= entry*(1+gain):
+                if row["High"] >= entry * (1 + gain):
                     g += 1
                     break
-                if row["Low"] <= entry*(1-STOP):
+                if row["Low"] <= entry * (1 - STOP):
                     l += 1
                     break
             else:
@@ -104,10 +117,10 @@ def backtest(df, gain):
             t += 1
 
     if t == 0:
-        return 0,0,0
+        return 0, 0, 0, 0
 
-    pg = g/t
-    pl = l/t
+    pg = g / t
+    pl = l / t
     edge = pg - pl
 
     expectativa = (pg * gain) - (pl * STOP)
@@ -123,6 +136,7 @@ prog = st.progress(0)
 for i, ativo in enumerate(ativos):
     try:
         df = yf.download(ativo, period="2y", interval="1d")
+
         if df.empty:
             continue
 
@@ -130,47 +144,60 @@ for i, ativo in enumerate(ativos):
         w = semanal(df)
 
         sc_setup = score_setup(df, w)
-
-        if sc_setup < 6:
-            continue
-
-        cen = []
         adx = df.iloc[-1]["ADX"]
+
+        cenarios = []
 
         for g in GAINS:
             pg, pl, edge, exp = backtest(df, g)
-            cen.append({
-                "gain": int(g*100),
+
+            cenarios.append({
+                "gain": int(g * 100),
                 "pg": pg,
                 "pl": pl,
                 "edge": edge,
                 "exp": exp
             })
 
-        best = max(cen, key=lambda x: x["exp"])
+        # melhor cenário por expectativa
+        best = max(cenarios, key=lambda x: x["exp"])
+
+        # 🔥 FILTRO REAL
+        if best["exp"] <= 0:
+            continue
+
+        # SCORE FINAL (institucional)
+        score_final = (
+            (best["exp"] * 0.5) +
+            (best["edge"] * 0.3) +
+            ((sc_setup / 10) * 0.2)
+        )
 
         res.append({
             "Ativo": ativo.replace(".SA",""),
             "Score Setup": sc_setup,
             "Melhor Gain (%)": best["gain"],
-            "Prob Gain (%)": round(best["pg"]*100,2),
-            "Prob Loss (%)": round(best["pl"]*100,2),
-            "Edge": round(best["edge"],4),
-            "Expectativa": round(best["exp"],4),
-            "ADX": round(adx,2)
+            "Prob Gain (%)": round(best["pg"] * 100, 2),
+            "Prob Loss (%)": round(best["pl"] * 100, 2),
+            "Edge": round(best["edge"], 4),
+            "Expectativa": round(best["exp"], 4),
+            "Score Final": round(score_final, 4),
+            "ADX": round(adx, 2),
+            "Score Gain 6": round(cenarios[0]["exp"], 4),
+            "Score Gain 8": round(cenarios[1]["exp"], 4)
         })
 
     except:
         continue
 
-    prog.progress((i+1)/len(ativos))
+    prog.progress((i + 1) / len(ativos))
 
 df_res = pd.DataFrame(res)
 
 if not df_res.empty:
-    df_res = df_res.sort_values(by="Expectativa", ascending=False)
+    df_res = df_res.sort_values(by="Score Final", ascending=False)
     st.dataframe(df_res, use_container_width=True)
 else:
-    st.warning("Nenhum ativo passou — sistema pode estar conservador demais.")
+    st.warning("Nenhum ativo com expectativa positiva no momento.")
 
 st.write("⏱ Atualizado em:", datetime.now().strftime("%d/%m/%Y %H:%M:%S"))
